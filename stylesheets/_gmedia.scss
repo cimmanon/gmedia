@@ -1,0 +1,181 @@
+// --------------------------------------------------------------------------------
+// GMedia:  a mixin library that allows you to split up your CSS files based on media queries
+// --------------------------------------------------------------------------------
+
+$graceful-media: () !default;
+
+// ====================================================================================================
+//                                                                       | General Mixins
+// ====================================================================================================
+
+@function gsingle($q) {
+	@return append((), $q, comma);
+}
+
+@mixin gmedia($queries...) {
+	@if length($graceful-media) == 0 {
+		$collector: '';
+		
+		@each $q in $queries {
+			@if $collector != '' {
+				$collector: $collector + ', ';
+			}
+			$collector: list-to-media($q);
+		}
+		
+		@media #{$collector} {
+			@content;
+		}
+	} @else {
+		@if queries-to-graceful-media($queries) {
+			@content;
+		}
+	}
+}
+
+@mixin gmedia-min($w) {
+	@include gmedia(gsingle(min-width $w)) {
+		@content;
+	}
+}
+
+@mixin gmedia-max($w) {
+	@include gmedia(gsingle(max-width $w)) {
+		@content;
+	}
+}
+
+@mixin gmedia-between($w1, $w2) {
+	@include gmedia((min-width $w1, max-width $w2)) {
+		@content;
+	}
+}
+
+// ====================================================================================================
+//                                                                       | Query Building Functions
+// ====================================================================================================
+
+// http://www.w3.org/TR/css3-mediaqueries/
+// The complete list of media types in HTML4 is: 'aural', 'braille', 'handheld', 'print', 'projection', 'screen', 'tty', 'tv'. CSS2 defines the same list, deprecates 'aural' and adds 'embossed' and 'speech'. Also, 'all' is used to indicate that the style sheet applies to all media types.
+
+$media-types: screen, print, aural, braille, handheld, projection, tty, tv, embossed, speech;
+$has-min-max: width, height, device-width, device-height, device-pixel-ratio, aspect-ratio, color-index, resolution;
+
+@function queries-to-graceful-media($queries) {
+	@each $q in $queries {
+		@if list-to-graceful-media($q) {
+			@return true;
+		}
+	}
+	@return false;
+}
+
+@function list-to-media($list) { // generate a media query string from a list
+	$collector: '';
+	@each $p in $list {
+		@if $p != null {
+			@if $collector != '' {
+				$collector: $collector + ' and ';
+			}
+			
+			@if length($p) == 1 {
+				$collector: $collector + $p;
+			} @else if length($p) == 2 {
+				$k: nth($p, 1);
+				$v: nth($p, 2);
+				
+				@if $k == only or $k == unquote("not") {
+					$collector: $collector + $p;
+				} @else {
+					$collector: $collector + "(#{$k}: #{$v})";
+				}
+			} @else {
+				@warn "Using a list of 3 or more properties causes unexpected results";
+			}
+		}
+	}
+	@return $collector;
+}
+
+@function list-to-graceful-media($list) { // process the media query for generating a CSS file for a specific break point
+	@each $p in $list {
+		@each $g in $graceful-media {
+			$pkey: nth($p, 1);
+			$gkey: nth($g, 1);
+			
+			@if length($p) == 1 {
+				@if $pkey == null {
+					// skip
+				} @else if is-media($pkey) and is-media($gkey) and ($pkey != all and $pkey != $gkey) {
+					@return false;
+				}
+			} @else if length($p) == 2 {
+				$pval: nth($p, 2);
+				
+				@if length($g) == 1 {
+					@if is-media($pval) and is-media($gkey) {
+						@if $pkey == only and $pkey != $gkey { // only (eg. "only screen")
+							@return false;
+						} @else if $pkey == unquote("not") and $pkey == $gkey { // negation (eg. "not screen")
+							@return false;
+						}
+					}
+				} @else {
+					$gval: nth($g, 2);
+					
+					@if type-of($pval) == number {
+						$comparable: find-comparable($pval, $gval);
+						
+						@if ("min-#{$gkey}" == quote($pkey) or ($gkey == $pkey and is-min-type($pkey))) and $pval > $comparable {
+							@return false;
+						} @else if ("max-#{$gkey}" == quote($pkey) or ($gkey == $pkey and is-max-type($pkey))) and $pval < $comparable {
+							@return false;
+						} @else if $gkey == $pkey and $pval != $gval {
+							@return false;
+						}
+					} @else if $gkey == $pkey and $pval != $gval { // exact value (eg. "orientation: landscape")
+						@return false;
+					}
+				}
+			} @else {
+	//			$c: nth($p, 3);
+				@warn "Using a list of 3 or more properties causes unexpected results";
+			}
+		}
+	}
+	
+	@return true;
+}
+
+// ====================================================================================================
+//                                                                       | Helper Functions
+// ====================================================================================================
+
+@function find-comparable($val, $list) {
+	@each $item in $list {
+		@if comparable($val, $item) {
+			@return $item;
+		}
+	}
+}
+
+@function is-media-min-max($mm, $key) {
+	@each $p in $has-min-max {
+		@if $key == #{$mm}-#{$p} {
+			@return true;
+		}
+	}
+	@return false;
+}
+
+@function is-media-type($type) {
+	@return if(index($media-types, $type), true, false);
+}
+
+@function is-min-type($key) {
+	@return is-media-min-max(min, $key);
+}
+
+@function is-max-type($key) {
+	@return is-media-min-max(max, $key);
+}
